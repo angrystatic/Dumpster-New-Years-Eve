@@ -35,7 +35,7 @@
             flex-direction: column;
             justify-content: flex-start;
             align-items: center;
-            padding-top: 5vh; 
+            padding-top: 3vh; /* Slightly less padding from the very top */
             color: #fff;
             text-shadow: 0 0 15px rgba(0,0,0,1);
         }
@@ -45,6 +45,8 @@
             font-weight: 700;
             line-height: 1;
             margin-bottom: 10px;
+            /* Added margin to push the dumpster visual further down relative to text */
+            margin-top: 2vh; 
         }
 
         .label {
@@ -91,7 +93,8 @@
         scene.background = new THREE.Color(0x050505);
 
         const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-        camera.position.set(0, 2.2, 7.5);
+        // Adjusted camera slightly to provide better vertical clearance for the UI
+        camera.position.set(0, 2.0, 8.0);
         camera.lookAt(0, 1.2, 0);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -162,15 +165,14 @@
             ctx.shadowColor = '#ff0044';
             ctx.shadowBlur = 15;
             ctx.fillStyle = '#ff0044';
-            ctx.translate(512, 200); // Moved text up in the canvas
+            ctx.translate(512, 200); 
             ctx.rotate(-0.05);
             ctx.fillText(text, 0, 0);
             ctx.shadowBlur = 0;
-            // Drips
             for(let i = 0; i < 10; i++) {
                 const dx = (Math.random() - 0.5) * 600;
                 const dy = 50 + (Math.random() * 20);
-                const dl = 100 + Math.random() * 200; // Longer drips
+                const dl = 100 + Math.random() * 200;
                 ctx.beginPath();
                 ctx.lineWidth = 5 + Math.random() * 8;
                 ctx.lineCap = 'round';
@@ -186,7 +188,6 @@
             new THREE.PlaneGeometry(3, 1.5), 
             new THREE.MeshBasicMaterial({ map: createSprayTexture(currentYear), transparent: true, opacity: 0.85 })
         );
-        // Positioned higher on the Y axis to stay above the sleeve bar
         grafPlane.position.set(0, 1.35, 1.11);
         dumpsterGroup.add(grafPlane);
 
@@ -199,7 +200,6 @@
             const z = 1.15;
             stringPoints.push(new THREE.Vector3(x, y, z));
             
-            // Add a bulb at each point
             const bulbGeo = new THREE.SphereGeometry(0.04, 8, 8);
             const bulbMat = new THREE.MeshStandardMaterial({ 
                 color: lightColors[i % lightColors.length],
@@ -210,7 +210,6 @@
             bulb.position.set(x, y, z);
             dumpsterGroup.add(bulb);
             
-            // Add a tiny point light for every 4th bulb to save performance
             if (i % 4 === 0) {
                 const pLight = new THREE.PointLight(lightColors[i % lightColors.length], 0.5, 1);
                 pLight.position.set(x, y, z + 0.1);
@@ -241,7 +240,6 @@
             return new THREE.CanvasTexture(canvas);
         }
 
-        // Fire Particles
         const fireCount = 120;
         const fireGeo = new THREE.BufferGeometry();
         const firePos = new Float32Array(fireCount * 3);
@@ -263,7 +261,6 @@
         const fireParticles = new THREE.Points(fireGeo, fireMat);
         dumpsterGroup.add(fireParticles);
 
-        // Smoke Particles
         const smokeCount = 90;
         const smokeGeo = new THREE.BufferGeometry();
         const smokePos = new Float32Array(smokeCount * 3);
@@ -285,7 +282,6 @@
         const smokeParticles = new THREE.Points(smokeGeo, smokeMat);
         dumpsterGroup.add(smokeParticles);
 
-        // Embers
         const emberCount = 60;
         const emberGeo = new THREE.BufferGeometry();
         const emberPos = new Float32Array(emberCount * 3);
