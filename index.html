@@ -21,6 +21,8 @@
             width: 100%;
             height: 100%;
             z-index: 1;
+            /* Allow interactions for orbit controls */
+            pointer-events: auto; 
         }
 
         #overlay-container {
@@ -30,12 +32,12 @@
             width: 100%;
             height: 100%;
             z-index: 100;
-            pointer-events: none;
+            pointer-events: none; /* Let clicks pass through to canvas */
             display: flex;
             flex-direction: column;
             justify-content: flex-start;
             align-items: center;
-            padding-top: 3vh; /* Slightly less padding from the very top */
+            padding-top: 3vh;
             color: #fff;
             text-shadow: 0 0 15px rgba(0,0,0,1);
         }
@@ -45,8 +47,11 @@
             font-weight: 700;
             line-height: 1;
             margin-bottom: 10px;
-            /* Added margin to push the dumpster visual further down relative to text */
-            margin-top: 2vh; 
+            margin-top: 2vh;
+            background: -webkit-linear-gradient(#fff, #ccc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0px 0px 10px rgba(255, 100, 0, 0.5));
         }
 
         .label {
@@ -54,10 +59,24 @@
             letter-spacing: 0.5em;
             text-transform: uppercase;
             opacity: 0.9;
-            background: rgba(0,0,0,0.5);
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(4px);
             padding: 8px 24px;
             border-radius: 4px;
             border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .controls-hint {
+            position: fixed;
+            bottom: 20px;
+            width: 100%;
+            text-align: center;
+            color: rgba(255,255,255,0.3);
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 101;
+            text-transform: uppercase;
+            letter-spacing: 2px;
         }
 
         @media (max-width: 768px) {
@@ -72,113 +91,182 @@
         <div class="label">Time Until Collapse</div>
         <div id="countdown">00:00:00:00</div>
     </div>
+    
+    <div class="controls-hint">Drag to Rotate • Scroll to Zoom</div>
 
     <div id="canvas-container"></div>
 
+    <!-- Updated Import Map to include Addons -->
     <script type="importmap">
         {
             "imports": {
-                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
             }
         }
     </script>
 
     <script type="module">
         import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
         // --- 1. SETUP ---
         const currentYear = new Date().getFullYear().toString();
         const scene = new THREE.Scene();
-        scene.fog = new THREE.FogExp2(0x0a0a0a, 0.04);
+        scene.fog = new THREE.FogExp2(0x050505, 0.035);
         scene.background = new THREE.Color(0x050505);
 
         const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-        // Adjusted camera slightly to provide better vertical clearance for the UI
-        camera.position.set(0, 2.0, 8.0);
-        camera.lookAt(0, 1.2, 0);
+        camera.position.set(0, 3.0, 9.0); // Slightly higher starting point
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Performance optimization
         renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Softer shadows
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
         document.getElementById('canvas-container').appendChild(renderer.domElement);
 
+        // Controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI / 2 - 0.05; // Don't go below ground
+        controls.minDistance = 4;
+        controls.maxDistance = 15;
+        controls.target.set(0, 1.2, 0);
+
         // --- 2. LIGHTING ---
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4); 
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.2); // Dimmer ambient
         scene.add(ambientLight);
 
-        const rimLight = new THREE.DirectionalLight(0xffffff, 2.0);
-        rimLight.position.set(0, 5, -5);
+        // Rim/Moon light (Cool color to contrast fire)
+        const rimLight = new THREE.DirectionalLight(0x4455ff, 1.0);
+        rimLight.position.set(-5, 5, -5);
         scene.add(rimLight);
 
-        const fireLight = new THREE.PointLight(0xff4500, 25, 15);
-        fireLight.position.set(0, 1.8, 0);
+        // The Fire Light
+        const fireLight = new THREE.PointLight(0xff5500, 25, 20);
+        fireLight.position.set(0, 2.5, 0);
         fireLight.castShadow = true;
+        fireLight.shadow.bias = -0.0001;
         scene.add(fireLight);
 
-        // --- 3. DUMPSTER ---
+        // --- 3. ENVIRONMENT ---
+        // Ground Plane to catch shadows
+        const groundGeo = new THREE.PlaneGeometry(100, 100);
+        const groundMat = new THREE.MeshStandardMaterial({ 
+            color: 0x080808, 
+            roughness: 0.8, 
+            metalness: 0.2 
+        });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // --- 4. DUMPSTER ---
         const dumpsterGroup = new THREE.Group();
         scene.add(dumpsterGroup);
 
         const metalMat = new THREE.MeshStandardMaterial({
             color: 0x2d5a27, 
-            roughness: 0.5,
-            metalness: 0.5,
+            roughness: 0.6,
+            metalness: 0.4,
         });
 
+        // Main Body
         const body = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.8, 2.2), metalMat);
         body.position.y = 1.1;
         body.castShadow = true;
+        body.receiveShadow = true;
         dumpsterGroup.add(body);
 
+        // Ribs (Detail)
         const ribGeo = new THREE.BoxGeometry(0.12, 1.7, 0.15);
         for(let i = -1; i <= 1; i++) {
             const rL = new THREE.Mesh(ribGeo, metalMat);
             rL.position.set(-1.65, 1.1, i * 0.7);
+            rL.castShadow = true;
             dumpsterGroup.add(rL);
+            
             const rR = new THREE.Mesh(ribGeo, metalMat);
             rR.position.set(1.65, 1.1, i * 0.7);
+            rR.castShadow = true;
             dumpsterGroup.add(rR);
         }
 
+        // Top Sleeve
         const sleeve = new THREE.Mesh(new THREE.BoxGeometry(3.3, 0.3, 0.3), metalMat);
         sleeve.position.set(0, 0.8, 1.1);
+        sleeve.castShadow = true;
         dumpsterGroup.add(sleeve);
 
+        // Lids
         const lidGeo = new THREE.BoxGeometry(1.6, 0.1, 2.3);
         const lidMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 });
+        
+        // Open Lid
         const lidL = new THREE.Mesh(lidGeo, lidMat);
         lidL.position.set(-0.8, 2.0, -0.5);
-        lidL.rotation.x = -Math.PI / 3;
+        lidL.rotation.x = -Math.PI / 2.5;
+        lidL.castShadow = true;
         dumpsterGroup.add(lidL);
 
-        // --- 4. GRAFFITI ---
+        // Closed Lid (Slightly ajar for variety)
+        const lidR = new THREE.Mesh(lidGeo, lidMat);
+        lidR.position.set(0.8, 2.05, -0.1);
+        lidR.rotation.x = 0.1; // Just sitting on top
+        lidR.castShadow = true;
+        dumpsterGroup.add(lidR);
+
+        // TRASH (Fuel)
+        const trashMat = new THREE.MeshStandardMaterial({ color: 0x8B4513 }); // Cardboard
+        for(let k=0; k<8; k++) {
+            const trash = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), trashMat);
+            trash.position.set(
+                (Math.random()-0.5)*2.5, 
+                1.5 + Math.random()*0.5, 
+                (Math.random()-0.5)*1.5
+            );
+            trash.rotation.set(Math.random(), Math.random(), Math.random());
+            trash.castShadow = true;
+            dumpsterGroup.add(trash);
+        }
+
+        // --- 5. GRAFFITI ---
         function createSprayTexture(text) {
             const cvs = document.createElement('canvas');
             cvs.width = 1024; cvs.height = 512;
             const ctx = cvs.getContext('2d');
+            // Make background fully transparent
             ctx.clearRect(0,0,1024,512);
+            
             ctx.font = '900 220px "Black Ops One", system-ui';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
+            
+            // Drips/Mess
             ctx.shadowColor = '#ff0044';
-            ctx.shadowBlur = 15;
+            ctx.shadowBlur = 0;
             ctx.fillStyle = '#ff0044';
             ctx.translate(512, 200); 
             ctx.rotate(-0.05);
+            
+            // Main text
             ctx.fillText(text, 0, 0);
-            ctx.shadowBlur = 0;
-            for(let i = 0; i < 10; i++) {
-                const dx = (Math.random() - 0.5) * 600;
+            
+            // Add some "drips"
+            for(let i = 0; i < 15; i++) {
+                const dx = (Math.random() - 0.5) * 550;
                 const dy = 50 + (Math.random() * 20);
-                const dl = 100 + Math.random() * 200;
+                const dl = 50 + Math.random() * 200;
                 ctx.beginPath();
-                ctx.lineWidth = 5 + Math.random() * 8;
+                ctx.lineWidth = 4 + Math.random() * 6;
                 ctx.lineCap = 'round';
                 ctx.moveTo(dx, dy);
                 ctx.lineTo(dx, dy + dl);
-                ctx.strokeStyle = '#ff0044';
+                ctx.strokeStyle = '#d00030'; // Slightly darker for drips
                 ctx.stroke();
             }
             return new THREE.CanvasTexture(cvs);
@@ -186,17 +274,18 @@
 
         const grafPlane = new THREE.Mesh(
             new THREE.PlaneGeometry(3, 1.5), 
-            new THREE.MeshBasicMaterial({ map: createSprayTexture(currentYear), transparent: true, opacity: 0.85 })
+            new THREE.MeshBasicMaterial({ map: createSprayTexture(currentYear), transparent: true, opacity: 0.9 })
         );
         grafPlane.position.set(0, 1.35, 1.11);
         dumpsterGroup.add(grafPlane);
 
-        // --- 5. CHRISTMAS LIGHTS ---
-        const lightColors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff];
+        // --- 6. CHRISTMAS LIGHTS ---
+        const lightColors = [0xff0000, 0x00ff00, 0x0088ff, 0xffff00, 0xff00ff];
         const stringPoints = [];
-        for (let i = 0; i <= 20; i++) {
-            const x = -1.8 + (i * 0.18);
-            const y = 1.9 + Math.sin(i * 0.8) * 0.15;
+        for (let i = 0; i <= 24; i++) {
+            const x = -1.8 + (i * 0.15);
+            // Draped curve
+            const y = 1.9 + Math.sin(i * 0.5) * 0.15 - (Math.sin(i/24 * Math.PI)*0.5); 
             const z = 1.15;
             stringPoints.push(new THREE.Vector3(x, y, z));
             
@@ -204,14 +293,15 @@
             const bulbMat = new THREE.MeshStandardMaterial({ 
                 color: lightColors[i % lightColors.length],
                 emissive: lightColors[i % lightColors.length],
-                emissiveIntensity: 2
+                emissiveIntensity: 3
             });
             const bulb = new THREE.Mesh(bulbGeo, bulbMat);
             bulb.position.set(x, y, z);
             dumpsterGroup.add(bulb);
             
-            if (i % 4 === 0) {
-                const pLight = new THREE.PointLight(lightColors[i % lightColors.length], 0.5, 1);
+            // Add point lights sparsely to save performance but keep glow
+            if (i % 6 === 0) {
+                const pLight = new THREE.PointLight(lightColors[i % lightColors.length], 0.8, 1.5);
                 pLight.position.set(x, y, z + 0.1);
                 dumpsterGroup.add(pLight);
             }
@@ -221,7 +311,7 @@
         const string = new THREE.Line(stringGeo, stringMat);
         dumpsterGroup.add(string);
 
-        // --- 6. PARTICLE SYSTEMS ---
+        // --- 7. PARTICLE SYSTEMS (Fire, Smoke, Embers) ---
         function createCircleTexture(color, isGlow = false) {
             const canvas = document.createElement('canvas');
             canvas.width = 64; canvas.height = 64;
@@ -232,7 +322,7 @@
                 grad.addColorStop(1, 'rgba(0,0,0,0)');
             } else {
                 grad.addColorStop(0, color);
-                grad.addColorStop(0.5, color);
+                grad.addColorStop(0.4, color);
                 grad.addColorStop(1, 'rgba(0,0,0,0)');
             }
             ctx.fillStyle = grad;
@@ -240,102 +330,121 @@
             return new THREE.CanvasTexture(canvas);
         }
 
-        const fireCount = 120;
+        const fireCount = 150;
         const fireGeo = new THREE.BufferGeometry();
         const firePos = new Float32Array(fireCount * 3);
         const fireSpeeds = new Float32Array(fireCount);
+        const fireOffset = new Float32Array(fireCount); // For sine wave motion
+
         for(let i=0; i<fireCount; i++) {
-            firePos[i*3] = (Math.random()-0.5) * 2.2;
-            firePos[i*3+1] = 1.2 + Math.random();
+            firePos[i*3] = (Math.random()-0.5) * 2.5;
+            firePos[i*3+1] = 1.5 + Math.random();
             firePos[i*3+2] = (Math.random()-0.5) * 1.5;
-            fireSpeeds[i] = 0.04 + Math.random() * 0.04;
+            fireSpeeds[i] = 0.05 + Math.random() * 0.08;
+            fireOffset[i] = Math.random() * Math.PI * 2;
         }
         fireGeo.setAttribute('position', new THREE.BufferAttribute(firePos, 3));
         const fireMat = new THREE.PointsMaterial({
-            size: 1.6,
+            size: 2.0,
             map: createCircleTexture('rgba(255,100,20,1)', true),
             transparent: true,
             blending: THREE.AdditiveBlending,
-            depthWrite: false
+            depthWrite: false,
         });
         const fireParticles = new THREE.Points(fireGeo, fireMat);
         dumpsterGroup.add(fireParticles);
 
-        const smokeCount = 90;
+        const smokeCount = 100;
         const smokeGeo = new THREE.BufferGeometry();
         const smokePos = new Float32Array(smokeCount * 3);
         const smokeSpeeds = new Float32Array(smokeCount);
         for(let i=0; i<smokeCount; i++) {
-            smokePos[i*3] = (Math.random()-0.5) * 2.5;
-            smokePos[i*3+1] = 2 + Math.random() * 4;
-            smokePos[i*3+2] = (Math.random()-0.5) * 1.5;
-            smokeSpeeds[i] = 0.01 + Math.random() * 0.02;
+            smokePos[i*3] = (Math.random()-0.5) * 3.0;
+            smokePos[i*3+1] = 3 + Math.random() * 5;
+            smokePos[i*3+2] = (Math.random()-0.5) * 2.0;
+            smokeSpeeds[i] = 0.02 + Math.random() * 0.03;
         }
         smokeGeo.setAttribute('position', new THREE.BufferAttribute(smokePos, 3));
         const smokeMat = new THREE.PointsMaterial({
-            size: 3.8,
-            map: createCircleTexture('rgba(60,60,60,0.4)', true),
+            size: 4.5,
+            map: createCircleTexture('rgba(40,40,40,0.5)', true),
             transparent: true,
             depthWrite: false,
-            opacity: 0.4
+            opacity: 0.3
         });
         const smokeParticles = new THREE.Points(smokeGeo, smokeMat);
         dumpsterGroup.add(smokeParticles);
 
-        const emberCount = 60;
+        const emberCount = 80;
         const emberGeo = new THREE.BufferGeometry();
         const emberPos = new Float32Array(emberCount * 3);
         const emberSpeeds = new Float32Array(emberCount);
         for(let i=0; i<emberCount; i++) {
-            emberPos[i*3] = (Math.random()-0.5) * 2.2;
-            emberPos[i*3+1] = 1.2;
+            emberPos[i*3] = (Math.random()-0.5) * 2.5;
+            emberPos[i*3+1] = 1.5;
             emberPos[i*3+2] = (Math.random()-0.5) * 1.5;
-            emberSpeeds[i] = 0.05 + Math.random() * 0.12;
+            emberSpeeds[i] = 0.08 + Math.random() * 0.15;
         }
         emberGeo.setAttribute('position', new THREE.BufferAttribute(emberPos, 3));
         const emberMat = new THREE.PointsMaterial({
-            size: 0.18,
-            color: 0xffcc44,
+            size: 0.15,
+            color: 0xffaa00,
             transparent: true,
             blending: THREE.AdditiveBlending
         });
         const emberParticles = new THREE.Points(emberGeo, emberMat);
         dumpsterGroup.add(emberParticles);
 
-        // --- 7. ANIMATION LOOP ---
+        // --- 8. ANIMATION LOOP ---
         const clock = new THREE.Clock();
         function animate() {
             requestAnimationFrame(animate);
             const t = clock.getElapsedTime();
+            const dt = clock.getDelta();
 
-            fireLight.intensity = 22 + Math.sin(t * 15) * 10;
-            fireLight.position.x = Math.sin(t * 5) * 0.2;
+            controls.update(); // Update controls
 
+            // Flicker fire light
+            fireLight.intensity = 20 + Math.sin(t * 20) * 5 + Math.cos(t * 8) * 5;
+            fireLight.position.x = Math.sin(t * 3) * 0.3;
+            fireLight.position.z = Math.cos(t * 2) * 0.3;
+
+            // Animate Fire
             const fPos = fireGeo.attributes.position.array;
             for(let i=0; i<fireCount; i++) {
-                fPos[i*3+1] += fireSpeeds[i];
-                fPos[i*3] += Math.sin(t + i) * 0.005;
-                if(fPos[i*3+1] > 4.5) {
-                    fPos[i*3+1] = 1.2;
-                    fPos[i*3] = (Math.random()-0.5) * 2.2;
+                fPos[i*3+1] += fireSpeeds[i]; // Y movement
+                // Wiggle effect
+                fPos[i*3] += Math.sin(t * 2 + fireOffset[i]) * 0.01; 
+                
+                // Reset if too high
+                if(fPos[i*3+1] > 5.0) {
+                    fPos[i*3+1] = 1.5;
+                    fPos[i*3] = (Math.random()-0.5) * 2.5;
+                    fPos[i*3+2] = (Math.random()-0.5) * 1.5;
                 }
             }
             fireGeo.attributes.position.needsUpdate = true;
 
+            // Animate Smoke
             const sPos = smokeGeo.attributes.position.array;
             for(let i=0; i<smokeCount; i++) {
                 sPos[i*3+1] += smokeSpeeds[i];
-                if(sPos[i*3+1] > 9) {
-                    sPos[i*3+1] = 2;
+                sPos[i*3] += Math.sin(t + i) * 0.005; // Wind drift
+                if(sPos[i*3+1] > 12) {
+                    sPos[i*3+1] = 2.5;
+                    sPos[i*3] = (Math.random()-0.5) * 3.0;
                 }
             }
             smokeGeo.attributes.position.needsUpdate = true;
 
+            // Animate Embers
             const ePos = emberGeo.attributes.position.array;
             for(let i=0; i<emberCount; i++) {
                 ePos[i*3+1] += emberSpeeds[i];
-                if(ePos[i*3+1] > 7) {
-                    ePos[i*3+1] = 1.2;
+                ePos[i*3] += Math.sin(t * 5 + i) * 0.01; // Chaotic flutter
+                if(ePos[i*3+1] > 8) {
+                    ePos[i*3+1] = 1.5;
+                    ePos[i*3] = (Math.random()-0.5) * 2.5;
                 }
             }
             emberGeo.attributes.position.needsUpdate = true;
@@ -343,7 +452,7 @@
             renderer.render(scene, camera);
         }
 
-        // --- 8. UTILS ---
+        // --- 9. UTILS ---
         function updateTimer() {
             const nextYear = new Date(`January 1, ${parseInt(currentYear) + 1} 00:00:00`).getTime();
             const now = new Date().getTime();
